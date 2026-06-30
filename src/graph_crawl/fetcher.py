@@ -200,7 +200,7 @@ class Fetcher:
                 start_perf,
                 outcome=FetchOutcome.network_error,
                 status=ResourceStatus.error,
-                error=f"http error: {exc}",
+                error=f"connect error: {exc}",
             )
         except httpx.HTTPError as exc:
             return self._error_result(
