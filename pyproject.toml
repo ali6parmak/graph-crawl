@@ -5,12 +5,18 @@ description = "A research-oriented website mapping engine designed to discover, 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "httpx>=0.28.1",
     "idna>=3.18",
     "pydantic>=2.13.4",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [dependency-groups]
-dev = ["pytest", "ruff"]
+dev = [
+    "pytest",
+    "respx>=0.23.1",
+    "ruff",
+]
 
 [tool.ruff]
 line-length = 120
@@ -26,3 +32,4 @@ packages = ["src/graph_crawl"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra --strict-markers --strict-config"
+asyncio_mode = "auto"

@@ -29,7 +29,7 @@ class FetchOutcome(StrEnum):
 
 
 class RedirectHop(BaseModel):
-    """One hop in a redirect chain. The original request is hop 0."""
+    """One hop in a redirect chain. A 3xx response that pointed to another URL."""
 
     url: str
     status_code: int
