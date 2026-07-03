@@ -9,6 +9,7 @@ dependencies = [
     "idna>=3.18",
     "pydantic>=2.13.4",
     "pytest-asyncio>=1.4.0",
+    "selectolax>=0.4.10",
 ]
 
 [dependency-groups]
