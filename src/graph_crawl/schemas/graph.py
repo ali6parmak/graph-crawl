@@ -32,7 +32,7 @@ class Resource(BaseModel):
     so persisting it is mostly a write-through."""
 
     url: str
-    state: ResourceState
+    resource_state: ResourceState
     resource_type: ResourceType = ResourceType.unknown
     status_code: int | None = None
     content_type: str | None = None
