@@ -5,11 +5,13 @@ description = "A research-oriented website mapping engine designed to discover, 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "brotli>=1.2.0",
     "httpx>=0.28.1",
     "idna>=3.18",
     "pydantic>=2.13.4",
     "pytest-asyncio>=1.4.0",
     "selectolax>=0.4.10",
+    "zstandard>=0.25.0",
 ]
 
 [dependency-groups]
