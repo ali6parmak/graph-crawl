@@ -13,6 +13,7 @@ from graph_crawl.schemas.graph import CrawlResult, CrawlStats, Edge, Resource, R
 from graph_crawl.schemas.parse import ParsedDocument
 from graph_crawl.scope import Scope, host_scope
 from graph_crawl.urls import UnresolvableReference, is_crawlable, resolve
+from graph_crawl.sink import CrawlSink, NullSink
 
 _CHARSET_RE = re.compile(r"charset=([\w\-]+)", re.IGNORECASE)
 
@@ -34,6 +35,7 @@ class Crawler:
         max_pages: int = 100,
         max_depth: int = 5,
         max_frontier_size: int = 10000,
+        sink: CrawlSink | None = None,
     ) -> None:
         self._fetcher: Fetcher = fetcher
         self._scope: Scope = scope
@@ -41,29 +43,40 @@ class Crawler:
         self._max_pages: int = max_pages
         self._max_depth: int = max_depth
         self._max_frontier_size: int = max_frontier_size
+        self._sink: CrawlSink = sink if sink is not None else NullSink()
 
     async def crawl(self, seed: str) -> CrawlResult:
         """Crawl a single seed URL and return the discovered graph.
 
-        Never raises on per-URL failures (they become ``Resource.state``).
+        Never raises on per-URL failures (they become ``Resource.resource_state``).
         Raises only on a malformed seed that cannot be normalized.
         """
         started_at: datetime = datetime.now(timezone.utc)
-        seed_norm: str = normalize(seed)
+        seed_normalized: str = normalize(seed)
 
-        resources: dict[str, Resource] = {
-            seed_norm: Resource(
-                url=seed_norm,
-                resource_state=ResourceState.pending,
-                resource_type=url_resource_type(seed_norm),
-                depth=0,
-                discovered_at=started_at,
-            )
-        }
+        run_id: int = await self._sink.start_run(
+            seed_normalized,
+            started_at,
+            max_pages=self._max_pages,
+            max_depth=self._max_depth,
+            max_frontier_size=self._max_frontier_size,
+            delay=self._delay,
+        )
+
+        seed_resource: Resource = Resource(
+            url=seed_normalized,
+            resource_state=ResourceState.pending,
+            resource_type=url_resource_type(seed_normalized),
+            depth=0,
+            discovered_at=started_at,
+        )
+        resources: dict[str, Resource] = {seed_normalized: seed_resource}
+        await self._sink.record_resource(seed_resource, run_id=run_id, seed_url=seed_normalized)
+
         edges: list[Edge] = []
         edges_seen: set[tuple[str, str]] = set()
         frontier: Frontier = Frontier()
-        frontier.push(seed_norm, 0)
+        frontier.push(seed_normalized, 0)
 
         frontier_max: int = len(frontier)
         fetched_count: int = 0
@@ -115,6 +128,9 @@ class Crawler:
             if resource.resource_state in {ResourceState.fetched, ResourceState.fetched_leaf}:
                 fetched_count += 1
 
+            # Write-through: persist this fetch attempt + updated resource snapshot.
+            await self._sink.record_fetch(resource, fetch_result, run_id=run_id)
+
             # Parse and discover only on a real HTML fetch with a body present.
             if resource.resource_state is ResourceState.fetched and fetch_result.body:
                 resource.resource_type = ResourceType.html
@@ -122,11 +138,12 @@ class Crawler:
                 base_for_parse = fetch_result.final_url or frontier_item.url
                 parsed_document: ParsedDocument = parse_html(text, base_url=base_for_parse)
                 if parsed_document.is_ok:
-                    self._discover_links(
+                    await self._discover_links(
                         parsed_document,
                         source_url=frontier_item.url,
                         source_depth=frontier_item.depth,
-                        seed=seed_norm,
+                        seed=seed_normalized,
+                        run_id=run_id,
                         resources=resources,
                         edges=edges,
                         edges_seen=edges_seen,
@@ -140,33 +157,39 @@ class Crawler:
 
         finished_at: datetime = datetime.now(timezone.utc)
         stats: CrawlStats = _build_stats(resources, frontier_max, stopped_reason)
-        return CrawlResult(
-            seed=seed_norm,
+        result: CrawlResult = CrawlResult(
+            seed=seed_normalized,
             started_at=started_at,
             finished_at=finished_at,
             resources=resources,
             edges=edges,
             stats=stats,
         )
+        await self._sink.finish_run(run_id, result)
+        return result
 
-    def _discover_links(
+    async def _discover_links(
         self,
         parsed_document: ParsedDocument,
         *,
         source_url: str,
         source_depth: int,
         seed: str,
+        run_id: int,
         resources: dict[str, Resource],
         edges: list[Edge],
         edges_seen: set[tuple[str, str]],
         frontier: Frontier,
-    ):
+    ) -> None:
         """Resolve, filter, normalize and record every anchor in a parsed page.
 
         For each new in-scope, within-depth, potentially-HTML URL, enqueue it.
         Out-of-scope and known-non-HTML URLs are recorded as resources/edges
         but not enqueued.
-        """
+
+        Order matters for the DB write-through: the target resource is recorded
+        BEFORE the edge, so the edges→resources FK holds. The in-memory result
+        is unchanged (edges deduped by (source, target), self-links kept)."""
         child_depth: int = source_depth + 1
         time_now: datetime = datetime.now(timezone.utc)
         base_url: str = parsed_document.effective_base_url or source_url
@@ -180,29 +203,32 @@ class Crawler:
                 continue
             normalized_url: str = normalize(absolute_url)
 
-            edge_key = (source_url, normalized_url)
-            if edge_key not in edges_seen:
-                edges_seen.add(edge_key)
-                edges.append(Edge(source=source_url, target=normalized_url, rel=anchor.rel))
+            is_new_edge = (source_url, normalized_url) not in edges_seen
+            if is_new_edge:
+                edges_seen.add((source_url, normalized_url))
 
-            if normalized_url in resources:
-                continue
+            if normalized_url not in resources:
+                resource_type: ResourceType = url_resource_type(normalized_url)
+                if not self._scope(normalized_url, seed):
+                    resource_state = ResourceState.skipped
+                else:
+                    resource_state = ResourceState.pending
+                    if child_depth <= self._max_depth and is_html_url(normalized_url):
+                        frontier.push(normalized_url, child_depth)
+                new_resource = Resource(
+                    url=normalized_url,
+                    resource_state=resource_state,
+                    resource_type=resource_type,
+                    depth=child_depth,
+                    discovered_at=time_now,
+                )
+                resources[normalized_url] = new_resource
+                await self._sink.record_resource(new_resource, run_id=run_id, seed_url=seed)
 
-            resource_type: ResourceType = url_resource_type(normalized_url)
-            if not self._scope(normalized_url, seed):
-                resource_state = ResourceState.skipped
-            else:
-                resource_state = ResourceState.pending
-                if child_depth <= self._max_depth and is_html_url(normalized_url):
-                    frontier.push(normalized_url, child_depth)
-
-            resources[normalized_url] = Resource(
-                url=normalized_url,
-                resource_state=resource_state,
-                resource_type=resource_type,
-                depth=child_depth,
-                discovered_at=time_now,
-            )
+            if is_new_edge:
+                edge = Edge(source=source_url, target=normalized_url, rel=anchor.rel)
+                edges.append(edge)
+                await self._sink.record_edge(edge, run_id=run_id)
 
     def _is_allowed_by_robots(self, url: str) -> bool:
         return True
@@ -213,13 +239,17 @@ def _resource_state_from_fetch_result(fetch_result: FetchResult, html_content_ty
         return ResourceState.fetched if html_content_type else ResourceState.fetched_leaf
     if fetch_result.outcome is FetchOutcome.not_modified:
         return ResourceState.fetched  # no body to parse; counted as fetched
-    if fetch_result.outcome in {FetchOutcome.not_found, FetchOutcome.gone}:
+    if fetch_result.outcome is FetchOutcome.not_found:
         return ResourceState.not_found
+    if fetch_result.outcome is FetchOutcome.gone:
+        return ResourceState.gone  # 410 — permanently gone; never retry
+    if fetch_result.outcome is FetchOutcome.forbidden:
+        return ResourceState.needs_auth  # 401/403 — crawlable with credentials
     if fetch_result.outcome is FetchOutcome.rate_limited:
         return ResourceState.backoff
     if fetch_result.outcome is FetchOutcome.server_error:
         return ResourceState.backoff if fetch_result.retry_after is not None else ResourceState.error
-    return ResourceState.error  # forbidden, client_error, network_error, redirect loop
+    return ResourceState.error  # client_error, network_error, redirect_loop
 
 
 def _build_stats(resources: dict[str, Resource], frontier_max: int, stopped_reason: str | None) -> CrawlStats:
@@ -232,6 +262,10 @@ def _build_stats(resources: dict[str, Resource], frontier_max: int, stopped_reas
             stats.fetched_leaf += 1
         elif resource.resource_state is ResourceState.not_found:
             stats.not_found += 1
+        elif resource.resource_state is ResourceState.gone:
+            stats.gone += 1
+        elif resource.resource_state is ResourceState.needs_auth:
+            stats.needs_auth += 1
         elif resource.resource_state is ResourceState.error:
             stats.error += 1
         elif resource.resource_state is ResourceState.backoff:
