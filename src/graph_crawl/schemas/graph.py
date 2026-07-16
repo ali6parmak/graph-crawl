@@ -20,9 +20,11 @@ class ResourceState(StrEnum):
     pending = "pending"  # discovered, not yet fetched
     fetched = "fetched"  # 2xx HTML response, parsed for links
     fetched_leaf = "fetched_leaf"  # 2xx non-HTML response, not parsed
-    not_found = "not_found"  # 404 / 410
-    error = "error"  # 4xx (except 404/410), 5xx without retry, network error
-    backoff = "backoff"  # 429 / 503-with-Retry-After; not retried in
+    not_found = "not_found"  # 404 - may reappear, try at low freq
+    gone = "gone"  # 410 - permanently gone, never retry
+    needs_auth = "needs_auth"  # 401/403 - crawlable with credentials
+    error = "error"  # 4xx-other, 5xx-no-Retry-After, network error, redirect loop
+    backoff = "backoff"  # 429 / 503-with-Retry-After
     skipped = "skipped"  # out of scope, or robots-disallowed
 
 
@@ -56,6 +58,8 @@ class CrawlStats(BaseModel):
     fetched: int = 0
     fetched_leaf: int = 0
     not_found: int = 0
+    gone: int = 0
+    needs_auth: int = 0
     error: int = 0
     backoff: int = 0
     skipped: int = 0
@@ -82,13 +86,15 @@ class CrawlResult(BaseModel):
                 f"Seed: {self.seed}",
                 f"Stopped: {s.stopped_reason}",
                 f"Discovered: {s.discovered} unique URLs",
-                f"  fetched (HTML):      {s.fetched}",
+                f"  fetched (HTML):          {s.fetched}",
                 f"  fetched leaf (non-HTML): {s.fetched_leaf}",
-                f"  not found / gone:    {s.not_found}",
-                f"  errors:              {s.error}",
-                f"  backoff (429/503):   {s.backoff}",
+                f"  not found:               {s.not_found}",
+                f"  gone (410):              {s.gone}",
+                f"  needs auth (401/403):    {s.needs_auth}",
+                f"  errors:                 {s.error}",
+                f"  backoff (429/503):      {s.backoff}",
                 f"  skipped (out of scope): {s.skipped}",
-                f"  edges:               {len(self.edges)}",
-                f"  max frontier size:   {s.max_frontier_size}",
+                f"  edges:                  {len(self.edges)}",
+                f"  max frontier size:      {s.max_frontier_size}",
             ]
         )
