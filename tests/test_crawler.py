@@ -304,3 +304,48 @@ async def test_seed_is_normalized(respx_mock):
 
     assert result.seed == "https://example.org/"
     assert "https://example.org/" in result.resources
+
+
+@respx.mock(assert_all_called=False)
+async def test_410_maps_to_gone_state(respx_mock):
+    respx_mock.get("https://example.org/").mock(
+        return_value=httpx.Response(200, content=b'<a href="/gone">g</a>', headers={"Content-Type": "text/html"})
+    )
+    respx_mock.get("https://example.org/gone").mock(return_value=httpx.Response(410))
+
+    async with Fetcher() as f:
+        crawler = Crawler(f, delay=0.0)
+        result = await crawler.crawl(SEED)
+
+    assert result.resources["https://example.org/gone"].resource_state is ResourceState.gone
+    assert result.stats.gone == 1
+
+
+@respx.mock(assert_all_called=False)
+async def test_401_and_403_map_to_needs_auth(respx_mock):
+    respx_mock.get("https://example.org/").mock(
+        return_value=httpx.Response(
+            200,
+            content=b'<a href="/secret">s</a><a href="/denied">d</a>',
+            headers={"Content-Type": "text/html"},
+        )
+    )
+    respx_mock.get("https://example.org/secret").mock(return_value=httpx.Response(401))
+    respx_mock.get("https://example.org/denied").mock(return_value=httpx.Response(403))
+
+    async with Fetcher() as f:
+        crawler = Crawler(f, delay=0.0)
+        result = await crawler.crawl(SEED)
+
+    assert result.resources["https://example.org/secret"].resource_state is ResourceState.needs_auth
+    assert result.resources["https://example.org/denied"].resource_state is ResourceState.needs_auth
+    assert result.stats.needs_auth == 2
+
+
+async def test_default_sink_is_nullsink():
+    """A Crawler with no sink configured uses NullSink and runs unchanged (Phase 4 behavior)."""
+    async with Fetcher() as f:
+        c = Crawler(f)
+    from graph_crawl.sink import NullSink
+
+    assert isinstance(c._sink, NullSink)
