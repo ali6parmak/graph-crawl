@@ -23,6 +23,9 @@ from graph_crawl.crawler import Crawler
 from graph_crawl.fetcher import Fetcher
 from graph_crawl.schemas.graph import ResourceState
 from graph_crawl.sink import NullSink
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 async def main(
