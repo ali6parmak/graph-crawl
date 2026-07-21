@@ -74,6 +74,7 @@ def upgrade() -> None:
         sa.Column("source_url", sa.Text(), nullable=False),
         sa.Column("target_url", sa.Text(), nullable=False),
         sa.Column("rel", sa.Text(), nullable=True),
+        sa.Column("raw_href", sa.Text(), nullable=True),  # resolved-absolute, pre-normalize
         sa.Column("discovered_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("discovery_run_id", sa.BigInteger(), nullable=True),
