@@ -15,6 +15,8 @@ from graph_crawl.scope import Scope, host_scope
 from graph_crawl.urls import UnresolvableReference, is_crawlable, resolve
 from graph_crawl.sink import CrawlSink, NullSink
 
+from graph_crawl.config import STRIP_PARAMS
+
 _CHARSET_RE = re.compile(r"charset=([\w\-]+)", re.IGNORECASE)
 
 
@@ -52,7 +54,7 @@ class Crawler:
         Raises only on a malformed seed that cannot be normalized.
         """
         started_at: datetime = datetime.now(timezone.utc)
-        seed_normalized: str = normalize(seed)
+        seed_normalized: str = normalize(seed, strip_params=STRIP_PARAMS)
 
         run_id: int = await self._sink.start_run(
             seed_normalized,
@@ -201,7 +203,7 @@ class Crawler:
                 continue
             if not is_crawlable(absolute_url):
                 continue
-            normalized_url: str = normalize(absolute_url)
+            normalized_url: str = normalize(absolute_url, strip_params=STRIP_PARAMS)
 
             is_new_edge = (source_url, normalized_url) not in edges_seen
             if is_new_edge:
@@ -226,7 +228,7 @@ class Crawler:
                 await self._sink.record_resource(new_resource, run_id=run_id, seed_url=seed)
 
             if is_new_edge:
-                edge = Edge(source=source_url, target=normalized_url, rel=anchor.rel)
+                edge = Edge(source=source_url, target=normalized_url, rel=anchor.rel, raw_href=absolute_url)
                 edges.append(edge)
                 await self._sink.record_edge(edge, run_id=run_id)
 
