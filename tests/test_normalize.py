@@ -1,7 +1,7 @@
 import pytest
 from graph_crawl.normalize import normalize
 
-TRACKING = {"utm_source", "utm_medium", "fbclid", "sessionid"}
+TRACKING: frozenset[str] = frozenset({"utm_source", "utm_medium", "fbclid", "sessionid"})
 
 
 # --- Idempotence (the most important property) ---

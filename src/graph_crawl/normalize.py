@@ -98,11 +98,11 @@ def _normalize_host(netloc: str) -> tuple[str, str, str]:
 def normalize(
     url: str,
     *,
-    strip_params: set[str] | None = None,
+    strip_params: frozenset[str] | None = None,
     default_ports: dict[str, int] | None = None,
 ) -> str:
     if strip_params is None:
-        strip_params = set()
+        strip_params = frozenset()
     if default_ports is None:
         default_ports = _DEFAULT_PORTS
 
