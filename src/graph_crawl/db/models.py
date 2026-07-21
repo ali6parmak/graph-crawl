@@ -91,6 +91,7 @@ class Edge(Base):
         Text, ForeignKey("resources.url", ondelete="RESTRICT"), nullable=False, primary_key=True
     )
     rel: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_href: Mapped[str | None] = mapped_column(Text, nullable=True)  # resolved-absolute, pre-normalize
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     discovery_run_id: Mapped[int | None] = mapped_column(

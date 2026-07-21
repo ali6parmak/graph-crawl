@@ -150,6 +150,7 @@ async def upsert_edge(session: AsyncSession, edge: EdgeDTO, *, run_id: int, now:
             source_url=edge.source,
             target_url=edge.target,
             rel=edge.rel,
+            raw_href=edge.raw_href,
             discovered_at=now,
             last_seen_at=now,
             discovery_run_id=run_id or None,
@@ -161,6 +162,7 @@ async def upsert_edge(session: AsyncSession, edge: EdgeDTO, *, run_id: int, now:
                 "last_seen_at": now,
                 "last_seen_run_id": run_id or None,
                 "rel": edge.rel,
+                "raw_href": edge.raw_href,
             },
         )
     )

@@ -47,11 +47,15 @@ class Resource(BaseModel):
 class Edge(BaseModel):
     """A hyperlink: page `source` contains a link to resource `target`. Both
     endpoints are normalized URLs. `rel` preserves the anchor's rel attribute
-    for provenance (e.g. 'nofollow')."""
+    for provenance (e.g. 'nofollow'). `raw_href` is the resolved-absolute URL
+    BEFORE normalize() — preserves default ports, casing, tracking params, etc.
+    so the original form, as the site served it, can be reconstructed (per
+    docs/normalization-policy.md: strip for identity, keep the original)."""
 
     source: str
     target: str
     rel: str | None = None
+    raw_href: str | None = None
 
 
 class CrawlStats(BaseModel):

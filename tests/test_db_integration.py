@@ -110,6 +110,15 @@ async def test_db_is_faithful_write_through_of_in_memory_graph(respx_mock, db):
         assert seed_row.depth == 0
         assert seed_row.seed_url == SEED
 
+        # raw_href is persisted on edges (for the mock site it equals target_url
+        # since the links are already normalized; the unit test covers the
+        # diverging case).
+        seed_a_edge = await session.scalar(
+            select(Edge).where(Edge.source_url == SEED, Edge.target_url == "https://example.org/a")
+        )
+        assert seed_a_edge is not None
+        assert seed_a_edge.raw_href == "https://example.org/a"
+
         # a 404's fetch_history row records the outcome + status
         not_found_fh = await session.scalar(select(FetchHistory).where(FetchHistory.url == "https://example.org/b"))
         assert not_found_fh is not None

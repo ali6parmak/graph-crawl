@@ -349,3 +349,51 @@ async def test_default_sink_is_nullsink():
     from graph_crawl.sink import NullSink
 
     assert isinstance(c._sink, NullSink)
+
+
+@respx.mock(assert_all_called=False)
+async def test_edge_raw_href_preserves_pre_normalize_url(respx_mock):
+    """raw_href is the resolved-absolute URL BEFORE normalize(); target is the
+    normalized key. A default port (:443) is stripped by normalize() but kept
+    in raw_href, so the two diverge — confirming the original is preserved."""
+    respx_mock.get("https://example.org/").mock(
+        return_value=httpx.Response(
+            200,
+            content=b'<a href="https://example.org:443/x">x</a>',
+            headers={"Content-Type": "text/html"},
+        )
+    )
+    async with Fetcher() as f:
+        crawler = Crawler(f, delay=0.0, max_depth=0, max_pages=1)  # discover only, don't enqueue children
+        result = await crawler.crawl(SEED)
+
+    edge = next(e for e in result.edges if e.target == "https://example.org/x")
+    assert edge.raw_href == "https://example.org:443/x"  # original port preserved
+    assert edge.target == "https://example.org/x"  # normalized: default port stripped
+    # the resource is keyed by the normalized URL; the :443 form is not a separate resource
+    assert "https://example.org/x" in result.resources
+    assert "https://example.org:443/x" not in result.resources
+
+
+@respx.mock(assert_all_called=False)
+async def test_tracking_params_stripped_for_identity_but_preserved_in_raw_href(respx_mock):
+    """The two halves of docs/normalization-policy.md working together:
+    `fbclid` is stripped from the resource's primary key (identity), but the
+    original href is preserved verbatim in `raw_href` (reconstruction)."""
+    respx_mock.get("https://example.org/").mock(
+        return_value=httpx.Response(
+            200,
+            content=b'<a href="/page?fbclid=ABC">x</a>',
+            headers={"Content-Type": "text/html"},
+        )
+    )
+    async with Fetcher() as f:
+        crawler = Crawler(f, delay=0.0, max_depth=0, max_pages=1)  # discover only
+        result = await crawler.crawl(SEED)
+
+    edge = next(e for e in result.edges if e.target == "https://example.org/page")
+    assert edge.target == "https://example.org/page"  # fbclid stripped for identity
+    assert edge.raw_href == "https://example.org/page?fbclid=ABC"  # original preserved
+    # one resource (the stripped key), not two
+    assert "https://example.org/page" in result.resources
+    assert "https://example.org/page?fbclid=ABC" not in result.resources
